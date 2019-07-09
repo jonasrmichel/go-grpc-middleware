@@ -1,6 +1,7 @@
 package grpc_opentracing
 
 import (
+	"strconv"
 	"strings"
 
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
@@ -23,6 +24,7 @@ const (
 // https://github.com/opentracing/basictracer-go/blob/1b32af207119a14b1b231d451df3ed04a72efebf/propagation_ot.go#L26
 // Jaeger from Uber use one-key schema with next format '{trace-id}:{span-id}:{parent-span-id}:{flags}'
 // https://www.jaegertracing.io/docs/client-libraries/#trace-span-identity
+// https://github.com/DataDog/dd-trace-go/blob/v1/ddtrace/tracer/textmap.go#L71
 func injectOpentracingIdsToTags(span opentracing.Span, tags grpc_ctxtags.Tags) {
 	if err := span.Tracer().Inject(span.Context(), opentracing.HTTPHeaders, &tagsCarrier{tags}); err != nil {
 		grpclog.Infof("grpc_opentracing: failed extracting trace info into ctx %v", err)
@@ -40,7 +42,7 @@ func (t *tagsCarrier) Set(key, val string) {
 		t.Tags.Set(TagTraceId, val) // this will most likely be base-16 (hex) encoded
 	}
 
-	if strings.Contains(key, "spanid") && !strings.Contains(strings.ToLower(key), "parent") {
+	if strings.Contains(key, "spanid") && !strings.Contains(key, "parent") {
 		t.Tags.Set(TagSpanId, val) // this will most likely be base-16 (hex) encoded
 	}
 
@@ -58,6 +60,24 @@ func (t *tagsCarrier) Set(key, val string) {
 			t.Tags.Set(TagSpanId, parts[1])
 
 			if parts[3] != jaegerNotSampledFlag {
+				t.Tags.Set(TagSampled, "true")
+			} else {
+				t.Tags.Set(TagSampled, "false")
+			}
+		}
+	}
+
+	if key == "x-datadog-trace-id" {
+		t.Tags.Set(TagTraceId, val)
+	}
+
+	if key == "x-datadog-parent-id" {
+		t.Tags.Set(TagSpanId, val)
+	}
+
+	if key == "x-datadog-sampling-priority" {
+		if i, err := strconv.Atoi(val); err == nil {
+			if i > 0 {
 				t.Tags.Set(TagSampled, "true")
 			} else {
 				t.Tags.Set(TagSampled, "false")
